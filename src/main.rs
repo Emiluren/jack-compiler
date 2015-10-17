@@ -67,9 +67,11 @@ fn main() {
     } else {
         while current_file < args.len() {
             let filename = &args[current_file];
-            println!("Compiling {}", filename);
+            let localname = filename.split('/').last().unwrap();
+            let outname = localname.split('.').next().unwrap().to_string() + ".xml";
+            println!("Compiling {} to {}", filename, outname);
             let mut analyzer = JackAnalyzer::new(filename);
-            let mut outfile = File::create("output.xml").unwrap();
+            let mut outfile = File::create(outname).unwrap();
             outfile.write_all(b"<tokens>\n").unwrap();
 
             while analyzer.has_more_tokens() {
