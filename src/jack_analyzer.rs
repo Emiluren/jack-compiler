@@ -7,6 +7,7 @@ use std::collections::HashSet;
 pub struct JackAnalyzer {
     data: Vec<char>,
     pos: usize,
+    first_time: bool,
     symbols: HashSet<char>,
 }
 
@@ -63,48 +64,113 @@ impl JackAnalyzer {
         JackAnalyzer {
             data: data_string.chars().collect(),
             pos: 0,
+            first_time: true,
             symbols: [
                 '{', '}', '(', ')', '[', ']', '.',
                 ',', ';', '+', '-', '*', '/', '&',
                 '|', '<', '>', '=', '~',
             ].iter().cloned().collect(),
-            keyword_map: keyword_map,
         }
     }
 
-    pub fn has_more_tokens(&self) -> bool {
-        let mut peek_pos = self.pos + 1;
-
-        if self.data[self.pos].is_alphanumeric() {
-            while self.data[peek_pos].is_alphanumeric() {
-                peek_pos += 1;
-                if peek_pos >= self.data.len() {
-                    return false;
-                }
-            }
+    fn start_of_token(&self, pos: usize) -> bool {
+        if pos >= self.data.len() {
+            return false;
         }
 
-        while self.data[peek_pos].is_whitespace() {
-            peek_pos += 1;
-            if peek_pos >= self.data.len() {
+        if self.data[pos].is_whitespace() {
+            return false;
+        }
+
+        if self.data[pos] == '/' {
+            if pos + 1 >= self.data.len() {
+                return true;
+            }
+
+            let next_char = self.data[pos+1];
+            if next_char == '/' || next_char == '*' {
                 return false;
             }
         }
         return true;
     }
 
-    pub fn advance(&mut self) {
-        let mut peek_pos = self.pos + 1;
-        if self.data[self.pos].is_alphanumeric() {
+    fn skip_comments_and_whitespace(&self, start_pos: usize) -> Option<usize> {
+        let mut peek_pos = start_pos;
+        while peek_pos < self.data.len() {
+            // Skip comments
+            if self.data[peek_pos] == '/' {
+                if peek_pos + 1 >= self.data.len() {
+                    return Some(peek_pos);
+                }
+
+                if self.data[peek_pos+1] == '/' {
+                    while self.data[peek_pos] != '\n' {
+                        peek_pos += 1;
+                        if peek_pos >= self.data.len() {
+                            return None;
+                        }
+                    }
+                } else if self.data[peek_pos+1] == '*' {
+                    while !(self.data[peek_pos] == '*' && self.data[peek_pos+1] == '/') {
+                        peek_pos += 1;
+                        if peek_pos + 1 >= self.data.len() {
+                            return None;
+                        }
+                    }
+                    peek_pos += 2;
+                }
+            }
+
+            while self.data[peek_pos].is_whitespace() {
+                peek_pos += 1;
+                if peek_pos >= self.data.len() {
+                    return None;
+                }
+            }
+
+            if self.start_of_token(peek_pos) {
+                return Some(peek_pos);
+            }
+        }
+        return None;
+    }
+
+    fn pos_of_next_token(&self) -> Option<usize> {
+        let mut peek_pos = self.pos;
+        
+        if !self.first_time {
+            peek_pos += 1;
+        }
+
+        if self.data[self.pos] == '\"' {
+            while self.data[peek_pos] != '\"' {
+                peek_pos += 1;
+            }
+            peek_pos += 1;
+        } else if peek_pos > 0 && self.data[self.pos].is_alphanumeric() {
             while self.data[peek_pos].is_alphanumeric() {
                 peek_pos += 1;
+                if peek_pos >= self.data.len() {
+                    return None;
+                }
             }
         }
 
-        while self.data[peek_pos].is_whitespace() {
-            peek_pos += 1;
+        let skip_result = self.skip_comments_and_whitespace(peek_pos);
+        return skip_result;
+    }
+
+    pub fn has_more_tokens(&self) -> bool {
+        match self.pos_of_next_token() {
+            Some(_) => true,
+            None => false,
         }
-        self.pos = peek_pos;
+    }
+
+    pub fn advance(&mut self) {
+        self.pos = self.pos_of_next_token().unwrap();
+        self.first_time = false;
     }
 
     pub fn token_type(&self) -> TokenType {
@@ -123,19 +189,18 @@ impl JackAnalyzer {
         }
 
         if current_char.is_alphabetic() {
-            let name = self.identifier();
-            if self.keyword_map.contains_key(&*name) {
-                return TokenType::Keyword;
+            return match self.key_word() {
+                Some(_) => TokenType::Keyword,
+                None => TokenType::Identifier,
             }
-            return TokenType::Identifier;
         }
 
-        panic!("YOLO!")
+        panic!("{} was nothing", current_char)
     }
 
     pub fn key_word(&self) -> Option<Keyword> {
         let name = self.identifier();
-        return match name {
+        return match &*name {
             "class" => Some(Keyword::Class),
             "method" => Some(Keyword::Method),
             "function" => Some(Keyword::Function),
