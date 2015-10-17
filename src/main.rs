@@ -59,6 +59,24 @@ fn get_tag_data(analyzer: &JackAnalyzer, token_type: &TokenType) -> String {
     }
 }
 
+fn write_xml_file(infile: &String) {
+    let localname = infile.split('/').last().unwrap();
+    let outname = localname.split('.').next().unwrap().to_string() + ".xml";
+    println!("Compiling {} to {}", infile, outname);
+    let mut analyzer = JackAnalyzer::new(infile);
+    let mut outfile = File::create(outname).unwrap();
+    outfile.write_all(b"<tokens>\n").unwrap();
+
+    while analyzer.has_more_tokens() {
+        analyzer.advance();
+        let token_type = analyzer.token_type();
+        let tag_data = get_tag_data(&analyzer, &token_type);
+        outfile.write_all(write_tag(get_tag_name(&token_type), &tag_data).as_bytes()).unwrap();
+    }
+    outfile.write_all(b"</tokens>\n").unwrap();
+    println!("YOLO!");
+}
+
 fn main() {
     let args: Vec<_> = env::args().collect();
     let mut current_file: usize = 1;
@@ -67,21 +85,7 @@ fn main() {
     } else {
         while current_file < args.len() {
             let filename = &args[current_file];
-            let localname = filename.split('/').last().unwrap();
-            let outname = localname.split('.').next().unwrap().to_string() + ".xml";
-            println!("Compiling {} to {}", filename, outname);
-            let mut analyzer = JackAnalyzer::new(filename);
-            let mut outfile = File::create(outname).unwrap();
-            outfile.write_all(b"<tokens>\n").unwrap();
-
-            while analyzer.has_more_tokens() {
-                analyzer.advance();
-                let token_type = analyzer.token_type();
-                let tag_data = get_tag_data(&analyzer, &token_type);
-                outfile.write_all(write_tag(get_tag_name(&token_type), &tag_data).as_bytes()).unwrap();
-            }
-            outfile.write_all(b"</tokens>\n").unwrap();
-            println!("YOLO!");
+            write_xml_file(filename);
             current_file += 1;
         }
     }
