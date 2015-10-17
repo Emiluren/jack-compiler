@@ -44,7 +44,7 @@ pub enum Keyword {
 }
 
 impl JackAnalyzer {
-    pub fn new(filename: &String) -> JackAnalyzer {
+    pub fn new(filename: &str) -> JackAnalyzer {
         let path = Path::new(filename);
         let display = path.display();
 
