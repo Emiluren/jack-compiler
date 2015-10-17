@@ -1,5 +1,7 @@
 mod jack_analyzer;
+mod compilation_engine;
 use jack_analyzer::*;
+use compilation_engine::*;
 use std::env;
 use std::fs::File;
 use std::io::prelude::*;
@@ -59,7 +61,7 @@ fn get_tag_data(analyzer: &JackAnalyzer, token_type: &TokenType) -> String {
     }
 }
 
-fn write_xml_file(infile: &String) {
+fn write_token_file(infile: &String) {
     let localname = infile.split('/').last().unwrap();
     let outname = localname.split('.').next().unwrap().to_string() + ".xml";
     println!("Compiling {} to {}", infile, outname);
@@ -85,7 +87,7 @@ fn main() {
     } else {
         while current_file < args.len() {
             let filename = &args[current_file];
-            write_xml_file(filename);
+            write_token_file(filename);
             current_file += 1;
         }
     }
