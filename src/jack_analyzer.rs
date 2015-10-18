@@ -11,6 +11,7 @@ pub struct JackAnalyzer {
     symbols: HashSet<char>,
 }
 
+#[derive(PartialEq)]
 pub enum TokenType {
     Keyword,
     Symbol,
@@ -19,6 +20,7 @@ pub enum TokenType {
     StringConst,
 }
 
+#[derive(PartialEq)]
 pub enum Keyword {
     Class,
     Method,
