@@ -17,7 +17,7 @@ fn write_token_file(infile: &String, outname: &String) {
 
     while analyzer.has_more_tokens() {
         analyzer.advance();
-        write_token_tag(&mut analyzer, &mut outfile);
+        write_tag_string(&analyzer, &mut outfile);
     }
     outfile.write_all(b"</tokens>\n").unwrap();
     println!("YOLO!");
