@@ -7,7 +7,7 @@ pub fn tag_string(tag_name: &str, content: &str) -> String {
     format!("<{0}> {1} </{0}>\n", tag_name, content)
 }
 
-fn keyword_to_str(keyword: &Keyword) -> &'static str {
+pub fn keyword_to_str(keyword: &Keyword) -> &'static str {
     match *keyword {
         Keyword::Class => "class",
         Keyword::Method => "method",
@@ -58,8 +58,12 @@ pub fn get_tag_data(analyzer: &JackAnalyzer, token_type: &TokenType) -> String {
     }
 }
 
-pub fn write_token_tag(analyzer: &mut JackAnalyzer, outfile: &mut File) {
-        let token_type = analyzer.token_type();
-        let tag_data = get_tag_data(&analyzer, &token_type);
-        outfile.write_all(tag_string(get_tag_name(&token_type), &tag_data).as_bytes()).unwrap();
+pub fn make_tag_string(analyzer: &JackAnalyzer) -> String {
+    let token_type = analyzer.token_type();
+    let tag_data = get_tag_data(&analyzer, &token_type);
+    tag_string(get_tag_name(&token_type), &tag_data)
+}
+
+pub fn write_tag_string(analyzer: &JackAnalyzer, outfile: &mut File) {
+    outfile.write_all(make_tag_string(&analyzer).as_bytes()).unwrap();
 }
