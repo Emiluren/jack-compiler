@@ -54,6 +54,7 @@ impl CompilationEngine {
                             &make_tag_string(&self.analyzer)),
             };
         }
+        write_tag_string(&self.analyzer, &mut self.outfile);
         self.outfile.write_all(b"</class>\n").unwrap();
     }
 
@@ -127,6 +128,7 @@ impl CompilationEngine {
     pub fn compile_parameter_list(&mut self) {
         self.outfile.write_all(b"<parameterList>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ')') {
+            write_tag_string(&self.analyzer, &mut self.outfile);
             self.analyzer.advance();
         }
         self.outfile.write_all(b"</parameterList>\n").unwrap();
@@ -172,14 +174,10 @@ impl CompilationEngine {
 
     pub fn compile_do(&mut self) {
         self.outfile.write_all(b"<doStatement>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write do keyword
-        self.analyzer.advance();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write class/object name
-        self.analyzer.advance();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write .
-        self.analyzer.advance();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write function name
-        self.analyzer.advance();
+        while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '(') {
+            write_tag_string(&self.analyzer, &mut self.outfile); // Write do keyword
+            self.analyzer.advance();
+        }
         write_tag_string(&self.analyzer, &mut self.outfile); // Write (
         self.analyzer.advance();
 
@@ -205,7 +203,6 @@ impl CompilationEngine {
 
         write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
         self.analyzer.advance();
-        // TODO: write proper assignment
         self.outfile.write_all(b"</letStatement>\n").unwrap();
     }
 
@@ -235,19 +232,19 @@ impl CompilationEngine {
         self.compile_statements();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
         self.analyzer.advance();
-        self.analyzer.advance();
         self.outfile.write_all(b"</whileStatement>\n").unwrap();
     }
 
     pub fn compile_return(&mut self) {
-        self.outfile.write_all(b"<returnStatement>").unwrap();
+        self.outfile.write_all(b"<returnStatement>\n").unwrap();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write return keyword
+        self.analyzer.advance();
         if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
             self.compile_expression();
         }
         write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
         self.analyzer.advance();
-        self.outfile.write_all(b"</returnStatement>").unwrap();
+        self.outfile.write_all(b"</returnStatement>\n").unwrap();
     }
 
     pub fn compile_if(&mut self) {
@@ -275,7 +272,6 @@ impl CompilationEngine {
         self.analyzer.advance();
         self.compile_statements();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
-        self.analyzer.advance();
         self.analyzer.advance();
         self.outfile.write_all(b"</ifStatement>\n").unwrap();
     }
