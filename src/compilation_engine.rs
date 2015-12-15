@@ -277,17 +277,71 @@ impl CompilationEngine {
     }
 
     pub fn compile_expression(&mut self) {
+        let ops = [
+            '+', '-', '*', '/', '&',
+            '|', '<', '>', '=',
+        ];
+
         self.outfile.write_all(b"<expression>\n").unwrap();
         self.compile_term();
-        // TODO: parse longer expressions
+        while self.analyzer.token_type() == TokenType::Symbol && ops.contains(&self.analyzer.symbol()) {
+            write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+
+            self.compile_term();
+        }
         self.outfile.write_all(b"</expression>\n").unwrap();
     }
 
     pub fn compile_term(&mut self) {
         self.outfile.write_all(b"<term>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile);
-        self.analyzer.advance();
-        // TODO: parse advanced terms
+        let simple_ops = [
+            TokenType::IntConst, TokenType::StringConst, TokenType::Keyword,
+        ];
+
+        let special_symbols = [
+            '(', '[', '-', '~',
+        ];
+
+        // Just write the expression if it's simple
+        let current_token_type = self.analyzer.token_type();
+        if simple_ops.contains(&current_token_type) {
+            write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+        }
+        // Parse sub-expression in ()
+        else if current_token_type == TokenType::Symbol && self.analyzer.symbol() == '(' {
+                write_tag_string(&self.analyzer, &mut self.outfile); // Write (
+                self.analyzer.advance();
+
+                self.compile_expression();
+                
+                write_tag_string(&self.analyzer, &mut self.outfile); // Write )
+                self.analyzer.advance();
+        } else {
+            // Parse expression that requires lookahead
+            while self.analyzer.token_type() != TokenType::Symbol && !special_symbols.contains(&self.analyzer.symbol()) {
+                write_tag_string(&self.analyzer, &mut self.outfile);
+                self.analyzer.advance();
+            }
+
+            let next_symbol = self.analyzer.symbol();
+            write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+            // See if the statement is an array, function call or unary operator
+            match next_symbol {
+                '(' => self.compile_expression_list(), // Function
+                '[' => self.compile_expression(),      // TODO: handle array,
+                '-' => self.compile_expression(),      // TODO: handle negation,
+                '~' => self.compile_expression(),      // TODO: handle inversion,
+                _ => (),
+            }
+
+            if next_symbol == '(' || next_symbol == '[' {
+                write_tag_string(&self.analyzer, &mut self.outfile);
+                self.analyzer.advance();
+            }
+        }
         self.outfile.write_all(b"</term>\n").unwrap();
     }
 
