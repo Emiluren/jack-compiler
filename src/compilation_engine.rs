@@ -196,11 +196,24 @@ impl CompilationEngine {
         self.analyzer.advance();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write variable name
         self.analyzer.advance();
+        
+        // TODO: handle array element assignment
+        if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '[' {
+            write_tag_string(&self.analyzer, &mut self.outfile); // Write [
+            self.analyzer.advance();
+
+            self.compile_expression();
+            
+            write_tag_string(&self.analyzer, &mut self.outfile); // Write ]
+            self.analyzer.advance();
+        }
+        
         write_tag_string(&self.analyzer, &mut self.outfile); // Write =
         self.analyzer.advance();
 
         self.compile_expression();
 
+        //println!("this is my semicolon: {}", self.analyzer.symbol());
         write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
         self.analyzer.advance();
         self.outfile.write_all(b"</letStatement>\n").unwrap();
@@ -299,8 +312,8 @@ impl CompilationEngine {
             TokenType::IntConst, TokenType::StringConst, TokenType::Keyword,
         ];
 
-        let special_symbols = [
-            '(', '[', '-', '~',
+        let lookahead_symbols = [
+            '(', '[',
         ];
 
         // Just write the expression if it's simple
@@ -308,6 +321,12 @@ impl CompilationEngine {
         if simple_ops.contains(&current_token_type) {
             write_tag_string(&self.analyzer, &mut self.outfile);
             self.analyzer.advance();
+        }
+        // Parse negation or inversion
+        else if current_token_type == TokenType::Symbol && ['-', '~'].contains(&self.analyzer.symbol()) {
+            write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+            self.compile_term();
         }
         // Parse sub-expression in ()
         else if current_token_type == TokenType::Symbol && self.analyzer.symbol() == '(' {
@@ -320,26 +339,30 @@ impl CompilationEngine {
                 self.analyzer.advance();
         } else {
             // Parse expression that requires lookahead
-            while self.analyzer.token_type() != TokenType::Symbol && !special_symbols.contains(&self.analyzer.symbol()) {
+            while self.analyzer.token_type() == TokenType::Identifier || (self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol () == '.') {
+                //self.outfile.write_all(b"yolo");
                 write_tag_string(&self.analyzer, &mut self.outfile);
                 self.analyzer.advance();
             }
 
+            //println!("tis a special symbol: {}", self.analyzer.symbol());
+
+            // Check if the next symbol is the start or end of special case
             let next_symbol = self.analyzer.symbol();
-            write_tag_string(&self.analyzer, &mut self.outfile);
-            self.analyzer.advance();
-            // See if the statement is an array, function call or unary operator
-            match next_symbol {
-                '(' => self.compile_expression_list(), // Function
-                '[' => self.compile_expression(),      // TODO: handle array,
-                '-' => self.compile_expression(),      // TODO: handle negation,
-                '~' => self.compile_expression(),      // TODO: handle inversion,
-                _ => (),
-            }
-
-            if next_symbol == '(' || next_symbol == '[' {
+            if lookahead_symbols.contains(&next_symbol) {
                 write_tag_string(&self.analyzer, &mut self.outfile);
                 self.analyzer.advance();
+                // See if the statement is an array, function call or unary operator
+                match next_symbol {
+                    '(' => self.compile_expression_list(), // Function
+                    '[' => self.compile_expression(),      // Array,
+                    _ => (),
+                }
+
+                if next_symbol == '(' || next_symbol == '[' {
+                    write_tag_string(&self.analyzer, &mut self.outfile);
+                    self.analyzer.advance();
+                }
             }
         }
         self.outfile.write_all(b"</term>\n").unwrap();
