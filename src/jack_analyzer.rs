@@ -106,6 +106,7 @@ impl JackAnalyzer {
                     return Some(peek_pos);
                 }
 
+                // Skip multiline comments
                 if self.data[peek_pos+1] == '/' {
                     while self.data[peek_pos] != '\n' {
                         peek_pos += 1;
@@ -124,6 +125,7 @@ impl JackAnalyzer {
                 }
             }
 
+            // Skip whitespace
             while self.data[peek_pos].is_whitespace() {
                 peek_pos += 1;
                 if peek_pos >= self.data.len() {

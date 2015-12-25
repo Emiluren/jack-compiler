@@ -345,8 +345,6 @@ impl CompilationEngine {
                 self.analyzer.advance();
             }
 
-            //println!("tis a special symbol: {}", self.analyzer.symbol());
-
             // Check if the next symbol is the start or end of special case
             let next_symbol = self.analyzer.symbol();
             if lookahead_symbols.contains(&next_symbol) {
