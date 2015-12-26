@@ -1,5 +1,6 @@
 use jack_analyzer::*;
 use xml_output::*;
+use symbol_table::*;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -7,6 +8,7 @@ use std::io::prelude::*;
 pub struct CompilationEngine {
     analyzer: JackAnalyzer,
     outfile: File,
+    symbol_table: SymbolTable,
 }
 
 impl CompilationEngine {
@@ -14,6 +16,7 @@ impl CompilationEngine {
         CompilationEngine {
             analyzer: JackAnalyzer::new(infile),
             outfile: File::create(outfile).unwrap(),
+            symbol_table: SymbolTable::new(),
         }
     }
 
@@ -57,21 +60,35 @@ impl CompilationEngine {
         write_tag_string(&self.analyzer, &mut self.outfile);
         self.outfile.write_all(b"</class>\n").unwrap();
     }
+    
+    fn compile_generic_var_dec(&mut self) {
+        // Check if it's a static variable, field, or local variable
+        let kind = keyword_to_kind(self.analyzer.key_word().unwrap());
+        write_tag_string(&self.analyzer, &mut self.outfile);
+        self.analyzer.advance();
+        
+        // Get the type of the variable
+        let type_name = self.analyzer.identifier();
+        write_tag_string(&self.analyzer, &mut self.outfile);
+        self.analyzer.advance();
+        
+        // Get the name of the variable
+        let name = self.analyzer.identifier();
+        self.symbol_table.define(name, type_name, kind);
+        write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
+        self.analyzer.advance();
+    }
 
     pub fn compile_class_var_dec(&mut self) {
         self.outfile.write_all(b"<classVarDec>\n").unwrap();
-        fn end_of_class_var(analyzer: &JackAnalyzer) -> bool {
-            if analyzer.token_type() != TokenType::Symbol {
-                return false;
-            }
-            analyzer.symbol() == ';'
-        }
 
-        while !end_of_class_var(&self.analyzer) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
-            self.analyzer.advance();
+        self.compile_generic_var_dec();
+
+        // Write semicolon
+        if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
+            panic!("Expected semicolon ; after class var declaration");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
+        write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         self.outfile.write_all(b"</classVarDec>\n").unwrap();
     }
@@ -79,6 +96,9 @@ impl CompilationEngine {
     pub fn compile_subroutine(&mut self) {
         self.outfile.write_all(b"<subroutineDec>\n").unwrap();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write function keyword
+        
+        // Clear symbol table
+        self.symbol_table.start_subroutine();
 
         self.analyzer.advance();
         if !(self.analyzer.token_type() == TokenType::Identifier || self.analyzer.token_type() == TokenType::Keyword) {
@@ -112,12 +132,13 @@ impl CompilationEngine {
         }
         write_tag_string(&self.analyzer, &mut self.outfile);
 
+        // Write main body of subroutine
         self.analyzer.advance();
         while self.analyzer.token_type() == TokenType::Keyword && self.analyzer.key_word().unwrap() == Keyword::Var {
             self.compile_var_dec();
         }
-
         self.compile_statements();
+
         write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
         self.analyzer.advance();
 
@@ -128,7 +149,19 @@ impl CompilationEngine {
     pub fn compile_parameter_list(&mut self) {
         self.outfile.write_all(b"<parameterList>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ')') {
+            // Skip commas between argument
+            if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ',' {
+                self.analyzer.advance();
+            }
+            // Get the type of the variable
+            let type_name = self.analyzer.identifier();
             write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+
+            // Get the name of the variable
+            let name = self.analyzer.identifier();
+            self.symbol_table.define(name, type_name, Kind::Arg);
+            write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
             self.analyzer.advance();
         }
         self.outfile.write_all(b"</parameterList>\n").unwrap();
@@ -136,18 +169,14 @@ impl CompilationEngine {
 
     pub fn compile_var_dec(&mut self) {
         self.outfile.write_all(b"<varDec>\n").unwrap();
-        fn end_of_var(analyzer: &JackAnalyzer) -> bool {
-            if analyzer.token_type() != TokenType::Symbol {
-                return false;
-            }
-            analyzer.symbol() == ';'
-        }
 
-        while !end_of_var(&self.analyzer) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
-            self.analyzer.advance();
+        self.compile_generic_var_dec();
+        
+        // Write semicolon
+        if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
+            panic!("Expected semicolon ; after class var declaration");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
+        write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         self.outfile.write_all(b"</varDec>\n").unwrap();
     }
@@ -175,7 +204,7 @@ impl CompilationEngine {
     pub fn compile_do(&mut self) {
         self.outfile.write_all(b"<doStatement>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '(') {
-            write_tag_string(&self.analyzer, &mut self.outfile); // Write do keyword
+            write_tag_string(&self.analyzer, &mut self.outfile);
             self.analyzer.advance();
         }
         write_tag_string(&self.analyzer, &mut self.outfile); // Write (
@@ -194,7 +223,9 @@ impl CompilationEngine {
         self.outfile.write_all(b"<letStatement>\n").unwrap();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write let keyword
         self.analyzer.advance();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write variable name
+
+        // Write variable name
+        write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
         self.analyzer.advance();
         
         // TODO: handle array element assignment
@@ -340,8 +371,11 @@ impl CompilationEngine {
         } else {
             // Parse expression that requires lookahead
             while self.analyzer.token_type() == TokenType::Identifier || (self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol () == '.') {
-                //self.outfile.write_all(b"yolo");
-                write_tag_string(&self.analyzer, &mut self.outfile);
+                if self.analyzer.token_type() == TokenType::Identifier && self.symbol_table.kind_of(&self.analyzer.identifier()) != Kind::None {
+                    write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
+                } else {
+                    write_tag_string(&self.analyzer, &mut self.outfile);
+                }
                 self.analyzer.advance();
             }
 
