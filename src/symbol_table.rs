@@ -1,6 +1,8 @@
+use jack_analyzer::Keyword;
+
 use std::collections::HashMap;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
     None,
     Static,
@@ -10,19 +12,28 @@ pub enum Kind {
 }
 
 struct TableEntry {
-    type_name: &'static str,
+    type_name: String,
     kind: Kind,
     index: i32,
 }
 
 pub struct SymbolTable {
-    class_symbols: HashMap<&'static str, TableEntry>,
-    function_symbols: HashMap<&'static str, TableEntry>,
+    class_symbols: HashMap<String, TableEntry>,
+    function_symbols: HashMap<String, TableEntry>,
     
     static_index: i32,
     field_index: i32,
     arg_index: i32,
     var_index: i32,
+}
+
+pub fn keyword_to_kind(keyword: Keyword) -> Kind {
+    match keyword {
+        Keyword::Static => Kind::Static,
+        Keyword::Field => Kind::Field,
+        Keyword::Var => Kind::Var,
+        _ => Kind::None,
+    }
 }
 
 impl SymbolTable {
@@ -44,7 +55,7 @@ impl SymbolTable {
         self.var_index = 0;
     }
 
-    pub fn define(&mut self, name: &'static str, t: &'static str, k: Kind) {
+    pub fn define(&mut self, name: String, t: String, k: Kind) {
         match k {
             Kind::Static => {
                 self.class_symbols.insert(name, TableEntry {type_name: t, kind: k, index: self.static_index});
@@ -76,7 +87,7 @@ impl SymbolTable {
         }
     }
 
-    pub fn kind_of(&self, name: &str) -> Kind {
+    pub fn kind_of(&self, name: &String) -> Kind {
         if self.function_symbols.contains_key(name) {
             self.function_symbols.get(name).unwrap().kind
         } else if self.class_symbols.contains_key(name) {
@@ -86,15 +97,15 @@ impl SymbolTable {
         }
     }
 
-    pub fn type_of(&self, name: &str) -> &'static str {
+    pub fn type_of(&self, name: &String) -> String {
         if self.function_symbols.contains_key(name) {
-            &self.function_symbols.get(name).unwrap().type_name
+            self.function_symbols.get(name).unwrap().type_name.clone()
         } else {
-            &self.class_symbols.get(name).unwrap().type_name
+            self.class_symbols.get(name).unwrap().type_name.clone()
         }
     }
 
-    pub fn index_of(&self, name: &str) -> i32 {
+    pub fn index_of(&self, name: &String) -> i32 {
         if self.function_symbols.contains_key(name) {
             self.function_symbols.get(name).unwrap().index
         } else {

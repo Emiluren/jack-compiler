@@ -1,6 +1,7 @@
 mod jack_analyzer;
 mod compilation_engine;
 mod xml_output;
+mod symbol_table;
 
 use jack_analyzer::*;
 use compilation_engine::*;

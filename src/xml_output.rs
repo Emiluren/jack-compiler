@@ -1,4 +1,5 @@
 use jack_analyzer::*;
+use symbol_table::*;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -43,6 +44,16 @@ pub fn get_tag_name(token_type: &TokenType) -> &'static str {
     }
 }
 
+pub fn kind_string(kind: Kind) -> &'static str {
+    match kind {
+        Kind::None => "none",
+        Kind::Static => "static",
+        Kind::Field => "field",
+        Kind::Arg => "arg",
+        Kind::Var => "var",
+    }
+}
+
 pub fn get_tag_data(analyzer: &JackAnalyzer, token_type: &TokenType) -> String {
     match *token_type {
         TokenType::Keyword => keyword_to_str(&analyzer.key_word().unwrap()).to_string(),
@@ -66,4 +77,11 @@ pub fn make_tag_string(analyzer: &JackAnalyzer) -> String {
 
 pub fn write_tag_string(analyzer: &JackAnalyzer, outfile: &mut File) {
     outfile.write_all(make_tag_string(&analyzer).as_bytes()).unwrap();
+}
+
+pub fn write_id_string(analyzer: &JackAnalyzer, outfile: &mut File, symbol_table: &SymbolTable) {
+    let name = analyzer.identifier();
+    outfile.write_all(format!("<{0}> name {1} {2} </{0}>\n", "identifier",
+                              symbol_table.type_of(&name),
+                              kind_string(symbol_table.kind_of(&name))).as_bytes()).unwrap();
 }
