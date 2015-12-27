@@ -81,7 +81,7 @@ pub fn write_tag_string(analyzer: &JackAnalyzer, outfile: &mut File) {
 
 pub fn write_id_string(analyzer: &JackAnalyzer, outfile: &mut File, symbol_table: &SymbolTable) {
     let name = analyzer.identifier();
-    outfile.write_all(format!("<{0}> name {1} {2} </{0}>\n", "identifier",
+    outfile.write_all(format!("<{0}> {1} {2} {3} </{0}>\n", "identifier", name,
                               symbol_table.type_of(&name),
                               kind_string(symbol_table.kind_of(&name))).as_bytes()).unwrap();
 }

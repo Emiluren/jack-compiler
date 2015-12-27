@@ -55,22 +55,24 @@ impl SymbolTable {
         self.var_index = 0;
     }
 
-    pub fn define(&mut self, name: String, t: String, k: Kind) {
+    pub fn define(&mut self, name: &String, t: &String, k: Kind) {
+        let name_clone = (*name).clone();
+        let t_clone = (*t).clone();
         match k {
             Kind::Static => {
-                self.class_symbols.insert(name, TableEntry {type_name: t, kind: k, index: self.static_index});
+                self.class_symbols.insert(name_clone, TableEntry {type_name: t_clone, kind: k, index: self.static_index});
                 self.static_index += 1;
             }
             Kind::Field => {
-                self.class_symbols.insert(name, TableEntry {type_name: t, kind: k, index: self.field_index});
+                self.class_symbols.insert(name_clone, TableEntry {type_name: t_clone, kind: k, index: self.field_index});
                 self.field_index += 1;
             }
             Kind::Arg => {
-                self.function_symbols.insert(name, TableEntry {type_name: t, kind: k, index: self.arg_index});
+                self.function_symbols.insert(name_clone, TableEntry {type_name: t_clone, kind: k, index: self.arg_index});
                 self.arg_index += 1;
             }
             Kind::Var => {
-                self.class_symbols.insert(name, TableEntry {type_name: t, kind: k, index: self.var_index});
+                self.class_symbols.insert(name_clone, TableEntry {type_name: t_clone, kind: k, index: self.var_index});
                 self.var_index += 1;
             }
             Kind::None => (),
