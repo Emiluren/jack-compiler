@@ -72,11 +72,19 @@ impl CompilationEngine {
         write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         
-        // Get the name of the variable
-        let name = self.analyzer.identifier();
-        self.symbol_table.define(name, type_name, kind);
-        write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
-        self.analyzer.advance();
+        // Define all variables
+        while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
+            // Skip commas
+            if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ',' {
+                self.analyzer.advance();
+            }
+            // Get the name of the variable
+            let name = self.analyzer.identifier();
+            self.symbol_table.define(&name, &type_name, kind);
+            self.outfile.write_all(b"<!--define-->\n").unwrap();
+            write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
+            self.analyzer.advance();
+        }
     }
 
     pub fn compile_class_var_dec(&mut self) {
@@ -85,9 +93,6 @@ impl CompilationEngine {
         self.compile_generic_var_dec();
 
         // Write semicolon
-        if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
-            panic!("Expected semicolon ; after class var declaration");
-        }
         write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         self.outfile.write_all(b"</classVarDec>\n").unwrap();
@@ -149,7 +154,7 @@ impl CompilationEngine {
     pub fn compile_parameter_list(&mut self) {
         self.outfile.write_all(b"<parameterList>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ')') {
-            // Skip commas between argument
+            // Skip commas between arguments
             if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ',' {
                 self.analyzer.advance();
             }
@@ -160,7 +165,8 @@ impl CompilationEngine {
 
             // Get the name of the variable
             let name = self.analyzer.identifier();
-            self.symbol_table.define(name, type_name, Kind::Arg);
+            self.symbol_table.define(&name, &type_name, Kind::Arg);
+            self.outfile.write_all(b"<!--define-->\n").unwrap();
             write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
             self.analyzer.advance();
         }
@@ -173,9 +179,6 @@ impl CompilationEngine {
         self.compile_generic_var_dec();
         
         // Write semicolon
-        if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
-            panic!("Expected semicolon ; after class var declaration");
-        }
         write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         self.outfile.write_all(b"</varDec>\n").unwrap();
@@ -225,6 +228,7 @@ impl CompilationEngine {
         self.analyzer.advance();
 
         // Write variable name
+        self.outfile.write_all(b"<!--use-->\n").unwrap();
         write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
         self.analyzer.advance();
         
@@ -293,6 +297,8 @@ impl CompilationEngine {
 
     pub fn compile_if(&mut self) {
         self.outfile.write_all(b"<ifStatement>\n").unwrap();
+        
+        // Write if keyword
         write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
@@ -309,7 +315,7 @@ impl CompilationEngine {
 
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
-            panic!("Missing opening brace on if expression");
+            panic!("Missing opening brace on if statement");
         }
         write_tag_string(&self.analyzer, &mut self.outfile);
 
@@ -317,6 +323,22 @@ impl CompilationEngine {
         self.compile_statements();
         write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
         self.analyzer.advance();
+        
+        if self.analyzer.token_type() == TokenType::Keyword && self.analyzer.key_word() == Some(Keyword::Else) {
+            write_tag_string(&self.analyzer, &mut self.outfile);
+            self.analyzer.advance();
+
+            if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
+                panic!("Missing opening brace on else statement");
+            }
+            write_tag_string(&self.analyzer, &mut self.outfile);
+
+            self.analyzer.advance();
+            self.compile_statements();
+            write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
+            self.analyzer.advance();
+        }
+        
         self.outfile.write_all(b"</ifStatement>\n").unwrap();
     }
 
@@ -372,6 +394,7 @@ impl CompilationEngine {
             // Parse expression that requires lookahead
             while self.analyzer.token_type() == TokenType::Identifier || (self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol () == '.') {
                 if self.analyzer.token_type() == TokenType::Identifier && self.symbol_table.kind_of(&self.analyzer.identifier()) != Kind::None {
+                    self.outfile.write_all(b"<!--use-->\n").unwrap();
                     write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
                 } else {
                     write_tag_string(&self.analyzer, &mut self.outfile);
