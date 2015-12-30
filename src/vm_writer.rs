@@ -5,6 +5,7 @@ use std::io::prelude::*;
 pub enum Segment {
     Const,
     Arg,
+    Local,
     Static,
     This,
     That,
@@ -32,6 +33,7 @@ pub struct VMWriter {
 fn segment_string(seg: Segment) -> &'static str {
     match seg {
         Segment::Const => "const",
+        Segment::Local => "local",
         Segment::Arg => "arg",
         Segment::Static => "static",
         Segment::This => "this",
@@ -98,7 +100,7 @@ impl VMWriter {
         self.write_string(format!("function {0} {1}\n", name, n_args))
     }
 
-    pub fn wrute_return(&mut self) {
+    pub fn write_return(&mut self) {
         self.write_string("return\n".to_string());
     }
 

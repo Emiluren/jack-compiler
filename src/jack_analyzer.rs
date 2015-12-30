@@ -45,6 +45,7 @@ pub enum Keyword {
     This,
 }
 
+// TODO: add function to print current line with line number
 impl JackAnalyzer {
     pub fn new(filename: &str) -> JackAnalyzer {
         let path = Path::new(filename);

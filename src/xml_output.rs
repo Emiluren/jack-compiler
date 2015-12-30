@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use jack_analyzer::*;
 use symbol_table::*;
 
