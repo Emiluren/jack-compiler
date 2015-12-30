@@ -1,44 +1,74 @@
 use jack_analyzer::*;
-use xml_output::*;
+use vm_writer::*;
 use symbol_table::*;
-
-use std::fs::File;
-use std::io::prelude::*;
+use xml_output::keyword_to_str;
 
 pub struct CompilationEngine {
     analyzer: JackAnalyzer,
-    outfile: File,
+    vm_writer: VMWriter,
     symbol_table: SymbolTable,
+    class_name: String,
+    label_num: i32,
 }
+
+fn kind_to_segment(kind: Kind) -> Segment {
+    match kind {
+        Kind::Static => Segment::Static,
+        Kind::Field => Segment::This,
+        Kind::Arg => Segment::Arg,
+        Kind::Var => Segment::Local,
+        _ => panic!("None kind no segment"),
+    }
+}
+
+fn symbol_to_command(sym: char) -> Command {
+    match sym {
+        '+' => Command::Add,
+        '-' => Command::Sub,
+        '&' => Command::And,
+        '|' => Command::Or,
+        '<' => Command::Lt,
+        '>' => Command::Gt,
+        '=' => Command::Eq,
+        _ => panic!(format!("symbol {} does not have an associated command", sym))
+    }
+}
+
+// TODO: maybe make everything more rusty with results instead of panics
+// TODO: have some way of reporting line number on errors (maybe count lines in JackAnalyzer)
 
 impl CompilationEngine {
     pub fn new(infile: &str, outfile: &str) -> CompilationEngine {
         CompilationEngine {
             analyzer: JackAnalyzer::new(infile),
-            outfile: File::create(outfile).unwrap(),
+            vm_writer: VMWriter::new(outfile),
             symbol_table: SymbolTable::new(),
+            class_name: String::new(),
+            label_num: 0,
         }
+    }
+    
+    fn gen_label_num(&mut self) -> String {
+        self.label_num += 1;
+        self.label_num.to_string()
     }
 
     pub fn compile_class(&mut self) {
-        self.outfile.write_all(b"<class>\n").unwrap();
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Keyword || self.analyzer.key_word().unwrap() != Keyword::Class {
             panic!("File must start with class");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Identifier {
             panic!("No class name");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        self.class_name = self.analyzer.identifier();
 
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
             panic!("Missing opening brace");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
 
         let is_class_var = |keyword: Keyword| keyword == Keyword::Static ||
             keyword == Keyword::Field;
@@ -53,23 +83,18 @@ impl CompilationEngine {
             match self.analyzer.token_type() {
                 TokenType::Keyword if is_class_var(self.analyzer.key_word().unwrap()) => self.compile_class_var_dec(),
                 TokenType::Keyword if is_subroutine(self.analyzer.key_word().unwrap()) => self.compile_subroutine(),
-                _ => panic!("Unknown token inside class: ".to_string() +
-                            &make_tag_string(&self.analyzer)),
+                _ => panic!("Unknown token inside class: "),
             };
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-        self.outfile.write_all(b"</class>\n").unwrap();
     }
     
     fn compile_generic_var_dec(&mut self) {
         // Check if it's a static variable, field, or local variable
         let kind = keyword_to_kind(self.analyzer.key_word().unwrap());
-        write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         
         // Get the type of the variable
         let type_name = self.analyzer.identifier();
-        write_tag_string(&self.analyzer, &mut self.outfile);
         self.analyzer.advance();
         
         // Define all variables
@@ -81,27 +106,17 @@ impl CompilationEngine {
             // Get the name of the variable
             let name = self.analyzer.identifier();
             self.symbol_table.define(&name, &type_name, kind);
-            self.outfile.write_all(b"<!--define-->\n").unwrap();
-            write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
             self.analyzer.advance();
         }
     }
 
     pub fn compile_class_var_dec(&mut self) {
-        self.outfile.write_all(b"<classVarDec>\n").unwrap();
-
         self.compile_generic_var_dec();
-
-        // Write semicolon
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        // Skip semicolon
         self.analyzer.advance();
-        self.outfile.write_all(b"</classVarDec>\n").unwrap();
     }
 
     pub fn compile_subroutine(&mut self) {
-        self.outfile.write_all(b"<subroutineDec>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write function keyword
-        
         // Clear symbol table
         self.symbol_table.start_subroutine();
 
@@ -109,33 +124,30 @@ impl CompilationEngine {
         if !(self.analyzer.token_type() == TokenType::Identifier || self.analyzer.token_type() == TokenType::Keyword) {
             panic!("No return type");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
 
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Identifier {
             panic!("No function name");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        let fn_name = self.analyzer.identifier();
 
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
             panic!("Missing parameter list");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
 
         self.analyzer.advance();
         self.compile_parameter_list();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ')' {
             panic!("Missing closing parenthesis");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        
+        self.vm_writer.write_function(&fn_name, self.symbol_table.var_count(Kind::Arg));
 
-        self.outfile.write_all(b"<subroutineBody>\n").unwrap();
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
             panic!("Missing function opening brace");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
 
         // Write main body of subroutine
         self.analyzer.advance();
@@ -144,15 +156,11 @@ impl CompilationEngine {
         }
         self.compile_statements();
 
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
+        // Skip closing brace
         self.analyzer.advance();
-
-        self.outfile.write_all(b"</subroutineBody>\n").unwrap();
-        self.outfile.write_all(b"</subroutineDec>\n").unwrap();
     }
 
     pub fn compile_parameter_list(&mut self) {
-        self.outfile.write_all(b"<parameterList>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ')') {
             // Skip commas between arguments
             if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ',' {
@@ -160,32 +168,22 @@ impl CompilationEngine {
             }
             // Get the type of the variable
             let type_name = self.analyzer.identifier();
-            write_tag_string(&self.analyzer, &mut self.outfile);
             self.analyzer.advance();
 
             // Get the name of the variable
             let name = self.analyzer.identifier();
             self.symbol_table.define(&name, &type_name, Kind::Arg);
-            self.outfile.write_all(b"<!--define-->\n").unwrap();
-            write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
             self.analyzer.advance();
         }
-        self.outfile.write_all(b"</parameterList>\n").unwrap();
     }
 
     pub fn compile_var_dec(&mut self) {
-        self.outfile.write_all(b"<varDec>\n").unwrap();
-
         self.compile_generic_var_dec();
-        
-        // Write semicolon
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        // Skip semicolon
         self.analyzer.advance();
-        self.outfile.write_all(b"</varDec>\n").unwrap();
     }
 
     pub fn compile_statements(&mut self) {
-        self.outfile.write_all(b"<statements>\n").unwrap();
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '}') {
             if self.analyzer.token_type() != TokenType::Keyword {
                 panic!("Statement must begin with keyword");
@@ -201,145 +199,225 @@ impl CompilationEngine {
                            keyword_to_str(&other)),
             };
         }
-        self.outfile.write_all(b"</statements>\n").unwrap();
+    }
+    
+    fn compile_function_call(&mut self, sym: char, name1: String) {
+        let mut n_args = 0;
+        let full_name = if sym == '.' {
+            let f_name = self.analyzer.identifier();
+            self.analyzer.advance();
+            let kind = self.symbol_table.kind_of(&name1);
+            // If it's a static function we can just write the class name, otherwise we need to find it
+            let class_name = if kind == Kind::None {
+                n_args = 0;
+                name1
+            } else {
+                // Push the object to the stack
+                self.vm_writer.write_push(kind_to_segment(kind), self.symbol_table.index_of(&name1));
+                n_args = 1;
+                self.symbol_table.type_of(&name1)
+            };
+            class_name + "." + &f_name
+        } else if sym == '(' {
+            // Local function, push this to stack
+            self.vm_writer.write_push(Segment::Arg, 0);
+            n_args = 1;
+            format!("{}.{}", self.class_name, name1)
+        } else {
+            panic!("Expected on of . and ( after identifier in do statement")
+        };
+        
+        // Skip ( TODO: check
+        self.analyzer.advance();
+
+        // Push parameters
+        n_args += self.compile_expression_list();
+
+        // Skip )
+        self.analyzer.advance();
+        // Skip semicolon TODO: check
+        self.analyzer.advance();
+        
+        self.vm_writer.write_call(&full_name, n_args);
     }
 
     pub fn compile_do(&mut self) {
-        self.outfile.write_all(b"<doStatement>\n").unwrap();
-        while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '(') {
-            write_tag_string(&self.analyzer, &mut self.outfile);
-            self.analyzer.advance();
+        // Skip do
+        self.analyzer.advance();
+
+        let name1 = self.analyzer.identifier();
+        self.analyzer.advance();
+
+        if self.analyzer.token_type() != TokenType::Symbol {
+            panic!("Symbol . or ( expected after identifier in do statement")
         }
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write (
+        let sym = self.analyzer.symbol();
         self.analyzer.advance();
 
-        self.compile_expression_list();
+        // Check what kind of function it is, call it and push return value to stack
+        self.compile_function_call(sym, name1);
 
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write )
-        self.analyzer.advance();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
-        self.analyzer.advance();
-        self.outfile.write_all(b"</doStatement>\n").unwrap();
+        // Ignore return value
+        self.vm_writer.write_pop(Segment::Temp, 0);
     }
 
     pub fn compile_let(&mut self) {
-        self.outfile.write_all(b"<letStatement>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write let keyword
+        // Skip let keyword
         self.analyzer.advance();
 
-        // Write variable name
-        self.outfile.write_all(b"<!--use-->\n").unwrap();
-        write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
+        // Parse variable name
+        let var_name = self.analyzer.identifier();
         self.analyzer.advance();
         
-        // TODO: handle array element assignment
+        let kind = self.symbol_table.kind_of(&var_name);
+        let seg = kind_to_segment(kind);
+        let index = self.symbol_table.index_of(&var_name);
+
+        // handle array element assignment
         if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == '[' {
-            write_tag_string(&self.analyzer, &mut self.outfile); // Write [
+            // Skip [
+            self.analyzer.advance();
+
+            // Place index on stack
+            self.compile_expression();
+            
+            // Skip ] TODO: check
+            self.analyzer.advance();
+        
+            // Skip = TODO: check
+            self.analyzer.advance();
+
+            // Calculate address
+            self.vm_writer.write_push(seg, index);
+            self.vm_writer.write_arithmetic(Command::Add);
+
+            // Place expression result on stack and do the assignment
+            // temp stuff is required since compile_expression might change pointer 1
+            self.compile_expression();
+            self.vm_writer.write_pop(Segment::Temp, 0);
+            self.vm_writer.write_pop(Segment::Pointer, 1);
+            self.vm_writer.write_push(Segment::Temp, 0);
+            self.vm_writer.write_pop(Segment::That, 0)
+        } else {
+            // Skip = TODO: check
             self.analyzer.advance();
 
             self.compile_expression();
-            
-            write_tag_string(&self.analyzer, &mut self.outfile); // Write ]
-            self.analyzer.advance();
+
+            self.vm_writer.write_pop(seg, index);
         }
-        
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write =
-        self.analyzer.advance();
 
-        self.compile_expression();
-
-        //println!("this is my semicolon: {}", self.analyzer.symbol());
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
+        // Skip semicolon
         self.analyzer.advance();
-        self.outfile.write_all(b"</letStatement>\n").unwrap();
     }
 
     pub fn compile_while(&mut self) {
-        self.outfile.write_all(b"<whileStatement>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        // Skip while keyword
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
             panic!("Missing expression for while loop");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        // Skip (
         self.analyzer.advance();
+
+        // TODO: add variable for num
+        let while_label = "while".to_string() + &self.gen_label_num();
+        let end_label = &format!("{}end", while_label);
+        self.vm_writer.write_label(&while_label);
+        // Calculate expression and check if loop should be continued
         self.compile_expression();
+        self.vm_writer.write_arithmetic(Command::Not);
+        self.vm_writer.write_if(&end_label);
+
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ')' {
             panic!("Missing closing parenthesis for while expression");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        // Skip )
         self.analyzer.advance();
+
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
             panic!("Missing opening brace on while loop");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        // Skip {
+        self.analyzer.advance();
 
-        self.analyzer.advance();
+        // Compile statements inside loop
         self.compile_statements();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
+
+        // Skip } TODO: check
         self.analyzer.advance();
-        self.outfile.write_all(b"</whileStatement>\n").unwrap();
+
+        self.vm_writer.write_goto(&while_label);
+        self.vm_writer.write_label(&end_label)
     }
 
     pub fn compile_return(&mut self) {
-        self.outfile.write_all(b"<returnStatement>\n").unwrap();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write return keyword
+        // Skip return keyword
         self.analyzer.advance();
         if !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ';') {
             self.compile_expression();
+        } else {
+            self.vm_writer.write_push(Segment::Const, 0);
         }
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write semicolon
+        // Skip ;
         self.analyzer.advance();
-        self.outfile.write_all(b"</returnStatement>\n").unwrap();
+        
+        self.vm_writer.write_return();
     }
 
     pub fn compile_if(&mut self) {
-        self.outfile.write_all(b"<ifStatement>\n").unwrap();
-        
-        // Write if keyword
-        write_tag_string(&self.analyzer, &mut self.outfile);
+        // Skip if keyword
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
             panic!("Missing expression for if statement");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        // Skip (
         self.analyzer.advance();
+
+        let if_label = "if".to_string() + &self.gen_label_num();
+        let end_label = format!("{}end", if_label);
+        let else_label = format!("{}else", if_label);
+        // Push result of expression to stack and skip to else if not true
         self.compile_expression();
+        self.vm_writer.write_arithmetic(Command::Not);
+        self.vm_writer.write_if(&else_label);
+
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ')' {
             panic!("Missing closing parenthesis for if expression");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        // Skip )
         self.analyzer.advance();
+
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
             panic!("Missing opening brace on if statement");
         }
-        write_tag_string(&self.analyzer, &mut self.outfile);
-
+        // Skip {
         self.analyzer.advance();
+
+        // Write if part
         self.compile_statements();
-        write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
+        self.vm_writer.write_goto(&end_label);
+
+        // Write closing brace
         self.analyzer.advance();
         
         if self.analyzer.token_type() == TokenType::Keyword && self.analyzer.key_word() == Some(Keyword::Else) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
+            // Skip else keyword
             self.analyzer.advance();
 
             if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
                 panic!("Missing opening brace on else statement");
             }
-            write_tag_string(&self.analyzer, &mut self.outfile);
-
             self.analyzer.advance();
+            
+            // Compile statements in else part
+            self.vm_writer.write_label(&else_label);
             self.compile_statements();
-            write_tag_string(&self.analyzer, &mut self.outfile); // Write closing brace
+
+            // Skip closing brace }
             self.analyzer.advance();
         }
-        
-        self.outfile.write_all(b"</ifStatement>\n").unwrap();
+        self.vm_writer.write_label(&end_label);
     }
 
     pub fn compile_expression(&mut self) {
@@ -348,90 +426,116 @@ impl CompilationEngine {
             '|', '<', '>', '=',
         ];
 
-        self.outfile.write_all(b"<expression>\n").unwrap();
+        // Push first term to stack
         self.compile_term();
         while self.analyzer.token_type() == TokenType::Symbol && ops.contains(&self.analyzer.symbol()) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
+            let sym = self.analyzer.symbol();
             self.analyzer.advance();
 
+            // Push new term to stack and do calculation
             self.compile_term();
+            if sym != '*' && sym != '/' {
+                self.vm_writer.write_arithmetic(symbol_to_command(sym));
+            } else if sym == '*' {
+                self.vm_writer.write_call("Math.multiply", 2);
+            } else if sym == '/' {
+                self.vm_writer.write_call("Math.divide", 2);
+            }
         }
-        self.outfile.write_all(b"</expression>\n").unwrap();
     }
 
     pub fn compile_term(&mut self) {
-        self.outfile.write_all(b"<term>\n").unwrap();
-        let simple_ops = [
-            TokenType::IntConst, TokenType::StringConst, TokenType::Keyword,
-        ];
-
-        let lookahead_symbols = [
-            '(', '[',
-        ];
-
-        // Just write the expression if it's simple
         let current_token_type = self.analyzer.token_type();
-        if simple_ops.contains(&current_token_type) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
+        // Push constants directly
+        if current_token_type == TokenType::IntConst {
+            self.vm_writer.write_push(Segment::Const, self.analyzer.int_val());
+            self.analyzer.advance();
+        } else if current_token_type == TokenType::StringConst {
+            self.vm_writer.write_call("String.new", 0);
+            for c in self.analyzer.string_val().chars() {
+                self.vm_writer.write_push(Segment::Const, c as i32);
+                self.vm_writer.write_call("String.appendChar", 2);
+            }
+            self.analyzer.advance();
+        } else if current_token_type == TokenType::Keyword {
+            let keyword = self.analyzer.key_word().unwrap();
+            if keyword == Keyword::This {
+                self.vm_writer.write_push(Segment::Arg, 0);
+            } else if keyword == Keyword::True {
+                self.vm_writer.write_push(Segment::Const, 1);
+                self.vm_writer.write_arithmetic(Command::Neg);
+            } else {
+                let val = match keyword {
+                    Keyword::False => 0,
+                    Keyword::Null => 0,
+                    _ => panic!("Invalid keyword in expression")
+                };
+                self.vm_writer.write_push(Segment::Const, val);
+            }
             self.analyzer.advance();
         }
         // Parse negation or inversion
-        else if current_token_type == TokenType::Symbol && ['-', '~'].contains(&self.analyzer.symbol()) {
-            write_tag_string(&self.analyzer, &mut self.outfile);
+        else if current_token_type == TokenType::Symbol && '-' == self.analyzer.symbol() {
             self.analyzer.advance();
             self.compile_term();
+            self.vm_writer.write_arithmetic(Command::Neg);
+        } else if current_token_type == TokenType::Symbol && '~' == self.analyzer.symbol() {
+            self.analyzer.advance();
+            self.compile_term();
+            self.vm_writer.write_arithmetic(Command::Not);
         }
         // Parse sub-expression in ()
         else if current_token_type == TokenType::Symbol && self.analyzer.symbol() == '(' {
-                write_tag_string(&self.analyzer, &mut self.outfile); // Write (
+                // Skip (
                 self.analyzer.advance();
 
                 self.compile_expression();
                 
-                write_tag_string(&self.analyzer, &mut self.outfile); // Write )
+                // Skip )
                 self.analyzer.advance();
         } else {
-            // Parse expression that requires lookahead
-            while self.analyzer.token_type() == TokenType::Identifier || (self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol () == '.') {
-                if self.analyzer.token_type() == TokenType::Identifier && self.symbol_table.kind_of(&self.analyzer.identifier()) != Kind::None {
-                    self.outfile.write_all(b"<!--use-->\n").unwrap();
-                    write_id_string(&self.analyzer, &mut self.outfile, &self.symbol_table);
-                } else {
-                    write_tag_string(&self.analyzer, &mut self.outfile);
-                }
-                self.analyzer.advance();
+            // Parse expression that requires variable, function call or array
+            if self.analyzer.token_type() != TokenType::Identifier {
+                panic!("Unexpected token inside expression term");
+            }
+            
+            let name1 = self.analyzer.identifier();
+            self.analyzer.advance();
+
+            // Expecing one of [ . or something new
+            if self.analyzer.token_type() != TokenType::Symbol {
+                panic!("Weird shit is going on inside term. Expected symbol");
             }
 
-            // Check if the next symbol is the start or end of special case
             let next_symbol = self.analyzer.symbol();
-            if lookahead_symbols.contains(&next_symbol) {
-                write_tag_string(&self.analyzer, &mut self.outfile);
-                self.analyzer.advance();
-                // See if the statement is an array, function call or unary operator
-                match next_symbol {
-                    '(' => self.compile_expression_list(), // Function
-                    '[' => self.compile_expression(),      // Array,
-                    _ => (),
-                }
-
-                if next_symbol == '(' || next_symbol == '[' {
-                    write_tag_string(&self.analyzer, &mut self.outfile);
-                    self.analyzer.advance();
-                }
+            if next_symbol == '(' || next_symbol == '.' {
+                self.compile_function_call(next_symbol, name1);
+            } else if next_symbol == '[' {
+                // Calculate address
+                self.compile_expression();
+                self.vm_writer.write_push(kind_to_segment(
+                    self.symbol_table.kind_of(&name1)), self.symbol_table.index_of(&name1));
+                self.vm_writer.write_arithmetic(Command::Add);
+                self.vm_writer.write_pop(Segment::Pointer, 1);
+                // Push content to stack
+                self.vm_writer.write_push(Segment::That, 0);
+            } else {
+                // It's a simple variable, push it (like a boss!)
+                self.vm_writer.write_push(kind_to_segment(
+                    self.symbol_table.kind_of(&name1)), self.symbol_table.index_of(&name1));
             }
         }
-        self.outfile.write_all(b"</term>\n").unwrap();
     }
 
-    pub fn compile_expression_list(&mut self) {
-        self.outfile.write_all(b"<expressionList>\n").unwrap();
+    pub fn compile_expression_list(&mut self) -> i32 {
+        let mut n = 0;
         while !(self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ')') {
             self.compile_expression();
             if self.analyzer.token_type() == TokenType::Symbol && self.analyzer.symbol() == ',' {
-                write_tag_string(&self.analyzer, &mut self.outfile);
                 self.analyzer.advance();
             }
+            n += 1;
         }
-        self.outfile.write_all(b"</expressionList>\n").unwrap();
+        n
     }
 }
