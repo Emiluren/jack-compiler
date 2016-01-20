@@ -7,7 +7,7 @@ mod vm_writer;
 use compilation_engine::*;
 
 use std::env;
-use std::io::prelude::*;
+use std::path::Path;
 
 fn main() {
     let args: Vec<_> = env::args().collect();
@@ -15,13 +15,15 @@ fn main() {
     if args.len() < 2 {
         println!("usage: jackcompiler files");
     } else {
+        // Compile every file
         while current_file < args.len() {
             let filename = &args[current_file];
+            let path = Path::new(filename);
+            let outfile = path.with_extension("vm");
             
-            let outname = filename.split('.').next().unwrap().to_string() + ".vm";
-            println!("Compiling {} to {}", filename, outname);
+            println!("Compiling {} to {}", filename, outfile.display());
             
-            let mut compiler = CompilationEngine::new(filename, &outname);
+            let mut compiler = CompilationEngine::new(path, &outfile);
             compiler.compile_class();
             current_file += 1;
         }

@@ -47,8 +47,7 @@ pub enum Keyword {
 
 // TODO: add function to print current line with line number
 impl JackAnalyzer {
-    pub fn new(filename: &str) -> JackAnalyzer {
-        let path = Path::new(filename);
+    pub fn new(path: &Path) -> JackAnalyzer {
         let display = path.display();
 
         let mut file = match File::open(&path) {
@@ -166,6 +165,7 @@ impl JackAnalyzer {
         return skip_result;
     }
 
+    #[allow(dead_code)]
     pub fn has_more_tokens(&self) -> bool {
         match self.pos_of_next_token() {
             Some(_) => true,

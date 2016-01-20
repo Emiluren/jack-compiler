@@ -2,6 +2,9 @@ use jack_analyzer::*;
 use vm_writer::*;
 use symbol_table::*;
 use xml_output::keyword_to_str;
+use xml_output::make_tag_string;
+
+use std::path::Path;
 
 pub struct CompilationEngine {
     analyzer: JackAnalyzer,
@@ -38,7 +41,7 @@ fn symbol_to_command(sym: char) -> Command {
 // TODO: have some way of reporting line number on errors (maybe count lines in JackAnalyzer)
 
 impl CompilationEngine {
-    pub fn new(infile: &str, outfile: &str) -> CompilationEngine {
+    pub fn new(infile: &Path, outfile: &Path) -> CompilationEngine {
         CompilationEngine {
             analyzer: JackAnalyzer::new(infile),
             vm_writer: VMWriter::new(outfile),
@@ -120,40 +123,57 @@ impl CompilationEngine {
         // Clear symbol table
         self.symbol_table.start_subroutine();
 
+        let subroutine_type = self.analyzer.key_word().unwrap();
         self.analyzer.advance();
+
         if !(self.analyzer.token_type() == TokenType::Identifier || self.analyzer.token_type() == TokenType::Keyword) {
             panic!("No return type");
         }
-
         self.analyzer.advance();
+
         if self.analyzer.token_type() != TokenType::Identifier {
             panic!("No function name");
         }
-        let fn_name = self.analyzer.identifier();
-
+        let fn_name = format!("{}.{}", self.class_name, self.analyzer.identifier());
         self.analyzer.advance();
+
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
             panic!("Missing parameter list");
         }
-
         self.analyzer.advance();
+
         self.compile_parameter_list();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ')' {
             panic!("Missing closing parenthesis");
         }
-        
-        self.vm_writer.write_function(&fn_name, self.symbol_table.var_count(Kind::Arg));
 
         self.analyzer.advance();
         if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '{' {
             panic!("Missing function opening brace");
         }
 
-        // Write main body of subroutine
+        // Parse local variable declarations
         self.analyzer.advance();
         while self.analyzer.token_type() == TokenType::Keyword && self.analyzer.key_word().unwrap() == Keyword::Var {
             self.compile_var_dec();
         }
+        
+        let n_local = self.symbol_table.var_count(Kind::Var);
+        self.vm_writer.write_function(&fn_name, n_local);
+
+        // Set up this pointer
+        if subroutine_type == Keyword::Constructor {
+            // Allocate space for the object
+            self.vm_writer.write_push(Segment::Const, self.symbol_table.var_count(Kind::Field));
+            self.vm_writer.write_call("Memory.alloc", 1);
+            self.vm_writer.write_pop(Segment::Pointer, 0);
+        } else if subroutine_type == Keyword::Method {
+            // Set this pointer to current object
+            self.vm_writer.write_push(Segment::Arg, 0);
+            self.vm_writer.write_pop(Segment::Pointer, 0);
+        }
+
+        // Write main body of subroutine
         self.compile_statements();
 
         // Skip closing brace
@@ -202,42 +222,48 @@ impl CompilationEngine {
     }
     
     fn compile_function_call(&mut self, sym: char, name1: String) {
+        //println!("at start of function call. state = {}, sym = {}", make_tag_string(&self.analyzer), sym.to_string());
         let mut n_args = 0;
         let full_name = if sym == '.' {
+            // name1 is a the name of a class or an object
             let f_name = self.analyzer.identifier();
             self.analyzer.advance();
             let kind = self.symbol_table.kind_of(&name1);
             // If it's a static function we can just write the class name, otherwise we need to find it
             let class_name = if kind == Kind::None {
-                n_args = 0;
                 name1
             } else {
                 // Push the object to the stack
                 self.vm_writer.write_push(kind_to_segment(kind), self.symbol_table.index_of(&name1));
-                n_args = 1;
+                n_args += 1;
                 self.symbol_table.type_of(&name1)
             };
+        
+            if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != '(' {
+                panic!(format!("Expected ( after function name. found {} instead", make_tag_string(&self.analyzer)));
+            }
+            self.analyzer.advance();
+            
             class_name + "." + &f_name
         } else if sym == '(' {
+            // name1 is the function name
             // Local function, push this to stack
-            self.vm_writer.write_push(Segment::Arg, 0);
-            n_args = 1;
+            self.vm_writer.write_push(Segment::Pointer, 0);
+            n_args += 1;
             format!("{}.{}", self.class_name, name1)
         } else {
-            panic!("Expected on of . and ( after identifier in do statement")
+            panic!("Expected on of . and ( after identifier in function call")
         };
-        
-        // Skip ( TODO: check
-        self.analyzer.advance();
 
         // Push parameters
         n_args += self.compile_expression_list();
 
         // Skip )
+        if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ')' {
+            panic!(format!("Expected ) after function name. found {} instead", make_tag_string(&self.analyzer)));
+        }
         self.analyzer.advance();
-        // Skip semicolon TODO: check
-        self.analyzer.advance();
-        
+
         self.vm_writer.write_call(&full_name, n_args);
     }
 
@@ -256,6 +282,11 @@ impl CompilationEngine {
 
         // Check what kind of function it is, call it and push return value to stack
         self.compile_function_call(sym, name1);
+
+        if self.analyzer.token_type() != TokenType::Symbol || self.analyzer.symbol() != ';' {
+            panic!("Expected ; at end of do statement");
+        }
+        self.analyzer.advance();
 
         // Ignore return value
         self.vm_writer.write_pop(Segment::Temp, 0);
@@ -427,9 +458,12 @@ impl CompilationEngine {
         ];
 
         // Push first term to stack
+        //println!("current fterm {}", make_tag_string(&self.analyzer));
         self.compile_term();
         while self.analyzer.token_type() == TokenType::Symbol && ops.contains(&self.analyzer.symbol()) {
+            //println!("yolo");
             let sym = self.analyzer.symbol();
+            //println!("current symbol {}", make_tag_string(&self.analyzer));
             self.analyzer.advance();
 
             // Push new term to stack and do calculation
@@ -445,6 +479,7 @@ impl CompilationEngine {
     }
 
     pub fn compile_term(&mut self) {
+        //println!("current term {}", make_tag_string(&self.analyzer));
         let current_token_type = self.analyzer.token_type();
         // Push constants directly
         if current_token_type == TokenType::IntConst {
@@ -460,7 +495,7 @@ impl CompilationEngine {
         } else if current_token_type == TokenType::Keyword {
             let keyword = self.analyzer.key_word().unwrap();
             if keyword == Keyword::This {
-                self.vm_writer.write_push(Segment::Arg, 0);
+                self.vm_writer.write_push(Segment::Pointer, 0);
             } else if keyword == Keyword::True {
                 self.vm_writer.write_push(Segment::Const, 1);
                 self.vm_writer.write_arithmetic(Command::Neg);
@@ -496,7 +531,7 @@ impl CompilationEngine {
         } else {
             // Parse expression that requires variable, function call or array
             if self.analyzer.token_type() != TokenType::Identifier {
-                panic!("Unexpected token inside expression term");
+                panic!(format!("Unexpected token inside expression term {}", make_tag_string(&self.analyzer)));
             }
             
             let name1 = self.analyzer.identifier();
@@ -509,6 +544,7 @@ impl CompilationEngine {
 
             let next_symbol = self.analyzer.symbol();
             if next_symbol == '(' || next_symbol == '.' {
+                self.analyzer.advance();
                 self.compile_function_call(next_symbol, name1);
             } else if next_symbol == '[' {
                 // Calculate address
