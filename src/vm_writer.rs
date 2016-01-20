@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::prelude::*;
+use std::path::Path;
 
 #[derive(Clone, Copy)]
 pub enum Segment {
@@ -32,9 +33,9 @@ pub struct VMWriter {
 
 fn segment_string(seg: Segment) -> &'static str {
     match seg {
-        Segment::Const => "const",
+        Segment::Const => "constant",
         Segment::Local => "local",
-        Segment::Arg => "arg",
+        Segment::Arg => "argument",
         Segment::Static => "static",
         Segment::This => "this",
         Segment::That => "that",
@@ -58,9 +59,9 @@ fn command_string(com: Command) -> &'static str {
 }
 
 impl VMWriter {
-    pub fn new(filename: &str) -> VMWriter {
+    pub fn new(path: &Path) -> VMWriter {
         VMWriter {
-            outfile: File::create(filename).unwrap(),
+            outfile: File::create(path).unwrap(),
         }
     }
     
@@ -96,15 +97,12 @@ impl VMWriter {
         self.write_string(format!("call {0} {1}\n", name, n_args))
     }
 
-    pub fn write_function(&mut self, name: &str, n_args: i32) {
-        self.write_string(format!("function {0} {1}\n", name, n_args))
+    pub fn write_function(&mut self, name: &str, n_locals: i32) {
+        self.write_string(format!("function {0} {1}\n",
+                                  name, n_locals))
     }
 
     pub fn write_return(&mut self) {
-        self.write_string("return\n".to_string());
-    }
-
-    pub fn close() {
-        // TODO: implement
+        self.write_string("return\n\n".to_string());
     }
 }
