@@ -408,7 +408,9 @@ impl CompilationEngine {
         let if_label = "if".to_string() + &self.gen_label_num();
         let end_label = format!("{}end", if_label);
         let else_label = format!("{}else", if_label);
+        
         // Push result of expression to stack and skip to else if not true
+        // TODO: do not skip to else if it does not exist
         self.compile_expression();
         self.vm_writer.write_arithmetic(Command::Not);
         self.vm_writer.write_if(&else_label);
@@ -429,9 +431,11 @@ impl CompilationEngine {
         self.compile_statements();
         self.vm_writer.write_goto(&end_label);
 
-        // Write closing brace
+        // Skip closing brace
         self.analyzer.advance();
-        
+
+        // Manage else part
+        self.vm_writer.write_label(&else_label);
         if self.analyzer.token_type() == TokenType::Keyword && self.analyzer.key_word() == Some(Keyword::Else) {
             // Skip else keyword
             self.analyzer.advance();
@@ -442,7 +446,6 @@ impl CompilationEngine {
             self.analyzer.advance();
             
             // Compile statements in else part
-            self.vm_writer.write_label(&else_label);
             self.compile_statements();
 
             // Skip closing brace }
