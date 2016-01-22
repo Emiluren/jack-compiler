@@ -489,8 +489,11 @@ impl CompilationEngine {
             self.vm_writer.write_push(Segment::Const, self.analyzer.int_val());
             self.analyzer.advance();
         } else if current_token_type == TokenType::StringConst {
-            self.vm_writer.write_call("String.new", 0);
-            for c in self.analyzer.string_val().chars() {
+            // Create a new string object and append all the characters
+            let string = self.analyzer.string_val();
+            self.vm_writer.write_push(Segment::Const, string.len() as i32);
+            self.vm_writer.write_call("String.new", 1);
+            for c in string.chars() {
                 self.vm_writer.write_push(Segment::Const, c as i32);
                 self.vm_writer.write_call("String.appendChar", 2);
             }
@@ -545,13 +548,19 @@ impl CompilationEngine {
                 panic!("Weird shit is going on inside term. Expected symbol");
             }
 
+            // Check if it's a function call or array
             let next_symbol = self.analyzer.symbol();
             if next_symbol == '(' || next_symbol == '.' {
                 self.analyzer.advance();
                 self.compile_function_call(next_symbol, name1);
             } else if next_symbol == '[' {
+                self.analyzer.advance();
                 // Calculate address
                 self.compile_expression();
+
+                // Skip ]
+                self.analyzer.advance();
+                
                 self.vm_writer.write_push(kind_to_segment(
                     self.symbol_table.kind_of(&name1)), self.symbol_table.index_of(&name1));
                 self.vm_writer.write_arithmetic(Command::Add);
