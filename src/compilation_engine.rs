@@ -126,6 +126,11 @@ impl CompilationEngine {
         let subroutine_type = self.analyzer.key_word().unwrap();
         self.analyzer.advance();
 
+        if subroutine_type == Keyword::Method {
+            // Make room for this pointer in parameters
+            self.symbol_table.define(&String::new(), &String::new(), Kind::Arg);
+        }
+
         if !(self.analyzer.token_type() == TokenType::Identifier || self.analyzer.token_type() == TokenType::Keyword) {
             panic!("No return type");
         }
